@@ -10,7 +10,7 @@ from tqdm import tqdm
 # =========================================================
 
 INPUT_ROOT = "Datasets/dataset_yolo/images"
-OUTPUT_ROOT = "Datasets/PlantVillage_YOLO_SEG"
+OUTPUT_ROOT = "Datasets/PlantVillage_YOLO_SEGv2"
 
 DEBUG_SAVE = False  # Set True to save overlay images for inspection
 
@@ -26,6 +26,55 @@ CLASS_MAP = {
 # STEP 1: LEAF SEGMENTATION (GRABCUT)
 # =========================================================
 
+def grabcut_leaf_segmentation(image):
+
+
+    h, w = image.shape[:2]
+
+    # --- Step 1: Initial mask ---
+    # 0 = sure background
+    # 1 = sure foreground
+    # 2 = probable background
+    # 3 = probable foreground
+    mask = np.zeros((h, w), np.uint8)
+
+    # Convert to HSV for initial guess
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # Wide green + yellow-green range
+    lower_leaf = np.array([20, 30, 30])
+    upper_leaf = np.array([95, 255, 255])
+    leaf_guess = cv2.inRange(hsv, lower_leaf, upper_leaf)
+
+    mask[:] = cv2.GC_PR_BGD
+    mask[leaf_guess > 0] = cv2.GC_PR_FGD
+
+    # --- Step 2: Run GrabCut ---
+    bgdModel = np.zeros((1, 65), np.float64)
+    fgdModel = np.zeros((1, 65), np.float64)
+
+    cv2.grabCut(image,mask,
+                None,
+                bgdModel,
+               fgdModel,
+                5,
+                cv2.GC_INIT_WITH_MASK
+    )
+
+    # --- Step 3: Extract leaf ---
+    leaf_mask = np.where(
+        (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD),
+        255,
+        0
+    ).astype("uint8")
+
+    # --- Step 4: Morphological cleanup ---
+    kernel = np.ones((7, 7), np.uint8)
+    leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_CLOSE, kernel, 2)
+    leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_OPEN, kernel, 1)
+
+    leaf = cv2.bitwise_and(image, image, mask=leaf_mask)
+    return leaf,leaf_mask
 def extract_leaf_grabcut(image):
     """
     Extracts the leaf from background using GrabCut.
@@ -349,10 +398,86 @@ def build_dataset():
 
 
 
+def debug_segmentation(image_path, disease_folder_name):
+    """
+    Visual debugging tool for:
+    - GrabCut leaf segmentation
+    - Disease lesion detection (weak labels)
+
+    Green  = Leaf
+    Red    = Detected lesions
+    """
+
+    # Load image
+    image = cv2.imread(image_path)
+    if image is None:
+        print("❌ Could not load image.")
+        return
+
+    # --- Step 1: Leaf Segmentation ---
+    leaf, leaf_mask = extract_leaf_grabcut(image)
+    leaf2,leaf_mask2=grabcut_leaf_segmentation(image)
+    if leaf is None:
+        print("❌ GrabCut failed.")
+        return
+
+    # --- Step 2: Lesion Detection ---
+    lesion_mask = get_lesion_mask(
+        leaf=leaf,
+        leaf_mask=leaf_mask,
+        disease_folder_name=disease_folder_name
+    )
+    lesion_mask2 = get_lesion_mask(
+        leaf=leaf2,
+        leaf_mask=leaf_mask2,
+        disease_folder_name=disease_folder_name
+    )
+
+    # --- Step 3: Visualization ---
+    overlay = image.copy()
+    overlay2 = image.copy()
+
+    # Leaf = Green
+    overlay[leaf_mask > 0] = [0, 255, 0]
+    overlay2[leaf_mask2 > 0] = [0, 255, 0]
+
+    # Lesions = Red (overwrites green where needed)
+    overlay[lesion_mask > 0] = [0, 0, 255]
+    overlay2[lesion_mask2 > 0] = [0, 0, 255]
+
+    # --- Display ---
+    cv2.imshow("Original Image", image)
+    cv2.imshow("Leaf  (GrabCut)", leaf)
+    cv2.imshow("Leaf Mask (GrabCut)", leaf_mask)
+
+    cv2.imshow("Lesion Mask (Weak Labels)", lesion_mask)
+    cv2.imshow("Overlay (Green=Leaf, Red=Lesions)", overlay)
+    cv2.imshow("Leaf Mask 2(GrabCut)", leaf_mask2)
+    cv2.imshow("Leaf  2(GrabCut)", leaf2)
+    cv2.imshow("Lesion Mask2 (Weak Labels)", lesion_mask2)
+    cv2.imshow("Overlay2 (Green=Leaf, Red=Lesions)", overlay2)
+
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
+
+
 
 # =========================================================
 # ENTRY POINT
 # =========================================================
 
 if __name__ == "__main__":
-    build_dataset()
+    # build_dataset()
+    debug_segmentation(
+        image_path="Datasets/dataset_yolo/images/train/Potato___Late_blight/4d085c80-4d57-4377-8fb3-eab3a25e5f5c___RS_LB 3060.jpg",
+        disease_folder_name="Potato___Late_blight"
+    )
+    # debug_segmentation(
+    #     image_path="Datasets/dataset_yolo/images/train/Potato___Early_blight/31d0ecc8-045d-4a4a-ac33-431556c83e4c___RS_Early.B 8692.jpg",
+    #     disease_folder_name="Potato___Early_blight"
+    # )
+
+
+

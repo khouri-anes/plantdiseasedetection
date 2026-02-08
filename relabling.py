@@ -5,7 +5,7 @@ import shutil
 from tqdm import tqdm  # Professional progress bar
 
 # --- CONFIGURATION ---
-INPUT_DATASET_DIR = "PlantVillage" #  raw downloaded folder
+INPUT_DATASET_DIR = "Datasets/PlantVillage"  #  raw downloaded folder
 OUTPUT_DATASET_DIR = "PlantVillage_Severity"  # Where new sorted images go
 
 # Thresholds for severity (Percentages)
