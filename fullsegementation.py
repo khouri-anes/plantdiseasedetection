@@ -109,6 +109,55 @@ def clean_mask(mask, leaf_mask, min_area_ratio=0.0005):
             cv2.drawContours(final, [c], -1, 255, -1)
     return final
 
+
+def get_broad_lesion_mask(hsv, leaf_mask):
+    """
+    Aggressive strategy: Anything inside the leaf that is NOT 'Healthy Green'
+    is considered a candidate lesion.
+    """
+    # Define "Healthy Green" range (Broad)
+    # Hue: 35-85 (Green), Sat: >50 (Vivid), Val: >50 (Bright)
+    lower_green = np.array([35, 40, 40])
+    upper_green = np.array([90, 255, 255])
+
+    healthy_mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    # Invert: The disease is what remains
+    # (Leaf Area) MINUS (Healthy Green Area)
+    lesion_candidates = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(healthy_mask))
+
+    return lesion_candidates
+
+
+def dark_spot_mask(hsv, gray, leaf_mask):
+    """
+    Universal function for: Septoria, Target Spot, Bacterial Spot.
+    These are all "Dark/Necrotic spots" on a green leaf.
+    """
+    # 1. Color Logic: Dark Spots
+    # We look for Low Brightness (Value < 100) OR Specific Brown Hues
+
+    # Dark pixels (Any hue, Low Value) - cathes black/dark brown necrosis
+    dark_necrosis = cv2.inRange(hsv, (0, 0, 0), (180, 255, 90))
+
+    # Brown pixels (Orange/Red hue, but not too bright)
+    browns = cv2.inRange(hsv, (0, 40, 40), (25, 255, 180))
+
+    lesions = cv2.bitwise_or(dark_necrosis, browns)
+
+    # 2. Strict Green Removal (Double check)
+    # Ensure we don't pick up dark shadows of green veins
+    lower_green = np.array([35, 60, 60])
+    upper_green = np.array([85, 255, 255])
+    green_safe = cv2.bitwise_not(cv2.inRange(hsv, lower_green, upper_green))
+
+    lesions = cv2.bitwise_and(lesions, green_safe)
+    lesions = cv2.bitwise_and(lesions, leaf_mask)
+
+    # 3. Shape Filter (Spots are usually small and scattered)
+    # We DO NOT use heavy morphological closing here, or we merge all spots.
+
+    return clean_mask(lesions, leaf_mask, min_area_ratio=0.0001)  # Very small spots allowed
 def grabcut_leaf_segmentation(image):
     """
     Extracts the leaf from background using GrabCut.
@@ -182,46 +231,134 @@ def late_blight_mask(hsv, gray, leaf_mask):
     combined = cv2.bitwise_or(cv2.bitwise_and(base, texture), black)
     return clean_mask(combined, leaf_mask)
 
-
-def septoria_mask(hsv, gray, leaf_mask):
-    # Brown spots + Gray Centers
-    brown = cv2.inRange(hsv, (0, 40, 50), (25, 255, 200))
-    lower_gray = np.array([0, 0, 100]);
-    upper_gray = np.array([180, 30, 255])
-    gray_center = cv2.bitwise_and(cv2.inRange(hsv, lower_gray, upper_gray), leaf_mask)
-
-    base = cv2.bitwise_or(brown, gray_center)
-    base = remove_green(hsv, base)
-    texture = texture_filter(gray, thresh_ratio=0.05)
-    return clean_mask(cv2.bitwise_and(base, texture), leaf_mask, min_area_ratio=0.0002)
-
-
-def bacterial_spot_mask(hsv, gray, leaf_mask):
-    dark = cv2.inRange(hsv, (0, 40, 40), (30, 255, 150))
-    base = remove_green(hsv, dark)
-    texture = texture_filter(gray, thresh_ratio=0.06)
-    return clean_mask(cv2.bitwise_and(base, texture), leaf_mask)
+#
+# def septoria_mask(hsv, gray, leaf_mask):
+#     # Brown spots + Gray Centers
+#     brown = cv2.inRange(hsv, (0, 40, 50), (25, 255, 200))
+#     lower_gray = np.array([0, 0, 100]);
+#     upper_gray = np.array([180, 30, 255])
+#     gray_center = cv2.bitwise_and(cv2.inRange(hsv, lower_gray, upper_gray), leaf_mask)
+#
+#     base = cv2.bitwise_or(brown, gray_center)
+#     base = remove_green(hsv, base)
+#     texture = texture_filter(gray, thresh_ratio=0.05)
+#     return clean_mask(cv2.bitwise_and(base, texture), leaf_mask, min_area_ratio=0.0002)
+#
+#
+# def bacterial_spot_mask(hsv, gray, leaf_mask):
+#     dark = cv2.inRange(hsv, (0, 40, 40), (30, 255, 150))
+#     base = remove_green(hsv, dark)
+#     texture = texture_filter(gray, thresh_ratio=0.06)
+#     return clean_mask(cv2.bitwise_and(base, texture), leaf_mask)
 
 
 def leaf_mold_mask(hsv, gray, leaf_mask):
-    grayish = cv2.inRange(hsv, (0, 0, 60), (180, 60, 160))
-    base = remove_green(hsv, grayish)
-    texture = texture_filter(gray, thresh_ratio=0.03)
-    return clean_mask(cv2.bitwise_and(base, texture), leaf_mask)
+    """
+    Leaf Mold: Pale, diffuse yellow/light-green patches.
+    Strategy: "Not Green" + Texture.
+    """
+    # 1. Get everything that isn't healthy green
+    non_green = get_broad_lesion_mask(hsv, leaf_mask)
 
+    # 2. Texture Check (Mold is fuzzy)
+    # We use a slightly higher texture threshold than mites
+    tex_mask = texture_filter(gray, thresh_ratio=0.03)
+
+    # Combine: It must be Discolored AND Textured
+    lesion = cv2.bitwise_and(non_green, tex_mask)
+
+    # Cleanup
+    return clean_mask(lesion, leaf_mask, min_area_ratio=0.001)
+
+#
+# def spider_mite_mask(hsv, gray, leaf_mask):
+#     """
+#     Spider Mites:
+#     1. Chlorosis (Yellowing/Whitening) -> Low Saturation or Yellow Hue
+#     2. Texture (Stippling) -> High Laplacian response
+#     """
+#     # 1. Broad Color Check (Yellows, Pale Greens, Whites)
+#     # Hue 10-35 (Yellow/Orange), or Low Saturation (Pale/White)
+#     yellows = cv2.inRange(hsv, (10, 20, 100), (35, 255, 255))
+#     pale = cv2.inRange(hsv, (0, 0, 100), (180, 60, 255))  # Low saturation
+#
+#     base = cv2.bitwise_or(yellows, pale)
+#     base = cv2.bitwise_and(base, leaf_mask)
+#
+#     # 2. Texture (Critical for Mites)
+#     # We lower the threshold to catch fine stippling
+#     lap = cv2.Laplacian(gray, cv2.CV_64F)
+#     texture = np.abs(lap).astype(np.uint8)
+#     _, texture_mask = cv2.threshold(texture, 15, 255, cv2.THRESH_BINARY)  # Lower thresh to 15
+#
+#     # Combine: Area must be (Pale/Yellow) OR (Highly Textured inside the leaf)
+#     candidates = cv2.bitwise_or(base, cv2.bitwise_and(leaf_mask, texture_mask))
+#
+#     # Clean up very small noise, but keep mite clusters
+#     return clean_mask(candidates, leaf_mask, min_area_ratio=0.001)
 
 def spider_mite_mask(hsv, gray, leaf_mask):
-    stipple = cv2.inRange(hsv, (15, 30, 120), (35, 150, 255))
-    texture = texture_filter(gray, thresh_ratio=0.07)
-    return clean_mask(cv2.bitwise_and(stipple, texture), leaf_mask, min_area_ratio=0.0002)
+    """
+    Spider Mites (CORRIGÉ):
+    La lésion est définie comme une zone qui est À LA FOIS décolorée ET texturée.
+    Cela évite de sélectionner toute la feuille.
+    """
+    # 1. Détection de la couleur (Chlorose / Points blancs)
+    # On cherche le jaune, l'orange et le blanc cassé
+    yellows = cv2.inRange(hsv, (10, 30, 100), (35, 255, 255))
+    pale = cv2.inRange(hsv, (0, 0, 120), (180, 50, 255))  # Blanc/Gris clair
+
+    # Masque couleur "potentiel"
+    color_candidates = cv2.bitwise_or(yellows, pale)
+
+    # CRITIQUE : On exclut formellement le vert sain profond
+    # (Hue 35-85, Sat > 50)
+    # Cela empêche de sélectionner les parties saines même si elles sont brillantes
+    lower_green = np.array([35, 50, 50])
+    upper_green = np.array([85, 255, 255])
+    healthy_green = cv2.inRange(hsv, lower_green, upper_green)
+
+    color_candidates = cv2.bitwise_and(color_candidates, cv2.bitwise_not(healthy_green))
+
+    # 2. Détection de Texture (Stippling)
+    # On remonte le seuil à 25 (15 était trop bas et captait le bruit du capteur)
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    texture = np.abs(lap).astype(np.uint8)
+    _, texture_mask = cv2.threshold(texture, 25, 255, cv2.THRESH_BINARY)
+
+    # 3. COMBINAISON "STRICTE" (ET logique)
+    # Pour être une lésion d'acariens, la zone doit être:
+    # (Décolorée) ET (Dans la feuille)
+    # Note: On n'oblige pas la texture partout car certaines taches jaunes sont lisses,
+    # mais on utilise la texture pour valider les zones ambiguës.
+
+    # Approche hybride :
+    # Zone A = Couleur Jaune/Blanc franche (Sûr à 100%)
+    zone_A = cv2.bitwise_and(color_candidates, leaf_mask)
+
+    # Zone B = Texture rugueuse (bruit possible)
+    # On ne garde la texture QUE si elle chevauche une zone légèrement décolorée
+    zone_B = cv2.bitwise_and(texture_mask, color_candidates)
+
+    final_mask = cv2.bitwise_or(zone_A, zone_B)
+
+    # Nettoyage : les piqûres d'acariens sont minuscules, on utilise un kernel très fin
+    # pour ne pas effacer les détails, mais on vire les pixels isolés.
+    kernel = np.ones((3, 3), np.uint8)
+    final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    return final_mask
 
 
-def target_spot_mask(hsv, gray, leaf_mask):
-    brown = cv2.inRange(hsv, (10, 40, 40), (30, 255, 200))
-    base = remove_green(hsv, brown)
-    texture = texture_filter(gray)
-    return clean_mask(cv2.bitwise_and(base, texture), leaf_mask)
-
+# def target_spot_mask(hsv, gray, leaf_mask):
+#     brown = cv2.inRange(hsv, (10, 40, 40), (30, 255, 200))
+#     base = remove_green(hsv, brown)
+#     texture = texture_filter(gray)
+#     return clean_mask(cv2.bitwise_and(base, texture), leaf_mask)
+# Mapped to the new generic "Dark Spot" function
+def septoria_mask(h, g, l): return dark_spot_mask(h, g, l)
+def bacterial_spot_mask(h, g, l): return dark_spot_mask(h, g, l)
+def target_spot_mask(h, g, l): return dark_spot_mask(h, g, l)
 
 def mosaic_virus_mask(hsv, gray, leaf_mask):
     lower = np.array([20, 40, 40]);
@@ -287,20 +424,42 @@ def mask_to_yolo_polygons(mask, class_id, img_w, img_h):
         labels.append(f"{class_id} " + " ".join(poly))
     return labels
 
-
 def save_debug_visuals(image, leaf_mask, lesion_mask, disease, img_name, split):
     debug_dir = os.path.join(OUTPUT_ROOT, "debug", split, disease)
     os.makedirs(debug_dir, exist_ok=True)
 
+    # --- Create overlay ---
     overlay = image.copy()
-    # Green Leaf
-    overlay[leaf_mask > 0] = [0, 255, 0]
-    # Red Lesions
-    overlay[lesion_mask > 0] = [0, 0, 255]
+
+    # Green leaf
+    overlay[leaf_mask > 0] = (0.6 * overlay[leaf_mask > 0] + np.array([0, 255, 0]) * 0.4).astype(np.uint8)
+
+    # Red lesions
+    overlay[lesion_mask > 0] = (0.4 * overlay[lesion_mask > 0] + np.array([0, 0, 255]) * 0.6).astype(np.uint8)
 
     # Text
-    cv2.putText(overlay, disease, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.imwrite(os.path.join(debug_dir, img_name), overlay)
+    cv2.putText(overlay, disease, (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
+    # --- Side-by-side ---
+    h1, w1, _ = image.shape
+    h2, w2, _ = overlay.shape
+    h = max(h1, h2)
+
+    canvas = np.zeros((h, w1 + w2, 3), dtype=np.uint8)
+    canvas[:h1, :w1] = image
+    canvas[:h2, w1:w1 + w2] = overlay
+
+    # Divider line
+    cv2.line(canvas, (w1, 0), (w1, h), (255, 255, 255), 2)
+
+    # Labels
+    cv2.putText(canvas, "Original", (10, h - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.putText(canvas, "Detection", (w1 + 10, h - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    cv2.imwrite(os.path.join(debug_dir, img_name), canvas)
 
 
 # =========================================================
@@ -455,10 +614,10 @@ if __name__ == "__main__":
     # build_dataset()
 
     # Uncomment this to test a single image
-    # debug_segmentation(
-    #     image_path="Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite/d75573fb-2bd8-43fa-9af5-3f219e35142f___RS_Late.B 5070.jpg",
-    #     disease_folder_name="Tomato_Spider_mites_Two_spotted_spider_mite"
-    # )
+    debug_segmentation(
+        image_path="Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite/75ff9553-3292-4a04-b856-2268da814f68___Com.G_SpM_FL 8548.JPG",
+        disease_folder_name="Tomato_Spider_mites_Two_spotted_spider_mite"
+    )
     # debug_segmentation(
     #     image_path="Datasets/dataset_yolo/images/train/Tomato_Late_blight/2d63d91d-5366-4f88-83e1-cc5ce4b16d2e___GHLB2 Leaf 156.1.jpg",
     #     disease_folder_name="Tomato_Late_blight"
@@ -472,7 +631,7 @@ if __name__ == "__main__":
     #     disease_folder_name="Tomato_Septoria_leaf_spot"
     # )
     # debug_segmentation(
-    #         image_path="Datasets/dataset_yolo/images/train/Tomato__Target_Spot/2c93d540-be61-4546-9cbc-74c776f19379___Com.G_TgS_FL 0690.JPG",
+    #         image_path="Datasets/dataset_yolo/images/train/Tomato__Target_Spot/907d3187-4443-47c6-a006-5683efdc3f95___Com.G_TgS_FL 0705.jpg",
     #         disease_folder_name="Tomato__Target_Spot"
     #     )
     # debug_segmentation(
@@ -484,7 +643,7 @@ if __name__ == "__main__":
     #     disease_folder_name="Tomato__Tomato_YellowLeaf__Curl_Virus"
     # )
     # debug_segmentation(
-    #     image_path="Datasets/dataset_yolo/images/train/Pepper__bell___Bacterial_spot/0a4c007d-41ab-4659-99cb-8a4ae4d07a55___NREC_B.Spot 1954.JPG",
+    #     image_path="Datasets/dataset_yolo/images/train/Pepper__bell___Bacterial_spot/00f2e69a-1e56-412d-8a79-fdce794a17e4___JR_B.Spot 3132.JPG",
     #     disease_folder_name="Pepper__bell___Bacterial_spot"
     # )
     # debug_segmentation(
@@ -503,8 +662,8 @@ if __name__ == "__main__":
     #     image_path="Datasets/dataset_yolo/images/train/Tomato_Early_blight/250df77c-cb57-4e85-9cf2-531033930030___RS_Erly.B 6477.JPG",
     #     disease_folder_name="Tomato_Early_blight"
     # )
-    debug_segmentation(
-        image_path="Datasets/dataset_yolo/images/train/Tomato_Early_blight/250df77c-cb57-4e85-9cf2-531033930030___RS_Erly.B 6477.JPG",
-        disease_folder_name="Tomato_Early_blight"
-    )
+    # debug_segmentation(
+    #     image_path="Datasets/dataset_yolo/images/train/Tomato_Early_blight/250df77c-cb57-4e85-9cf2-531033930030___RS_Erly.B 6477.JPG",
+    #     disease_folder_name="Tomato_Early_blight"
+    # )
 
