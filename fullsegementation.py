@@ -302,19 +302,31 @@ def spider_mite_mask(leaf,hsv, gray, leaf_mask):
     # Spider Mites :
     # La lésion est définie comme une zone qui est À LA FOIS décolorée ET texturée.
 
+    # 1. Color Detection (Chlorosis)
 
-    # 1. Détection de la couleur (Chlorose / Points blancs)
-    # On cherche le jaune, l'orange et le blanc cassé
     yellows = cv2.inRange(hsv, (10, 30, 100), (35, 255, 255))
-    pale = cv2.inRange(hsv, (0, 0, 120), (180, 50, 255))  # Blanc/Gris clair
+    h, s, v = cv2.split(hsv)
 
-    # Masque couleur "potentiel"
+    # Very bright
+    bright = cv2.inRange(v, 200, 255)
+
+    # Very low saturation
+    low_sat = cv2.inRange(s, 0, 40)
+
+    white_pixels = cv2.bitwise_and(bright, low_sat)
+
+    # Keep only inside leaf
+    pale = cv2.bitwise_and(white_pixels, leaf_mask)
+
+    # Desaturated green (early chlorosis)
+    chlorotic_green = cv2.inRange(hsv, (35, 0, 120), (85, 60, 255))
+
     color_candidates = cv2.bitwise_or(yellows, pale)
-
+    color_candidates = cv2.bitwise_or(color_candidates, chlorotic_green)
 
     # Cela empêche de sélectionner les parties saines même si elles sont brillantes
-    lower_green = np.array([35, 50, 50])
-    upper_green = np.array([85, 255, 255])
+    lower_green = np.array([30, 70, 50])
+    upper_green = np.array([80, 255, 200])
     healthy_green = cv2.inRange(hsv, lower_green, upper_green)
 
     color_candidates = cv2.bitwise_and(color_candidates, cv2.bitwise_not(healthy_green))
@@ -348,136 +360,241 @@ def spider_mite_mask(leaf,hsv, gray, leaf_mask):
 
     return final_mask
 
+# def septoria_mask(img, hsve, gray, mask):
+#     # ==========================================================
+#     # 1️⃣ Lighting normalization
+#     # ==========================================================
+#     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+#     L, A, B = cv2.split(lab)
+#
+#     clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
+#     L = clahe.apply(L)
+#
+#     lab_norm = cv2.merge((L, A, B))
+#     img_norm = cv2.cvtColor(lab_norm, cv2.COLOR_LAB2BGR)
+#
+#     blur = cv2.medianBlur(img_norm, 3)
+#     hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
+#     H, S, V = cv2.split(hsv)
+#
+#     # ==========================================================
+#     # 2️⃣ Robust green removal
+#     # ==========================================================
+#     lab2 = cv2.cvtColor(img_norm, cv2.COLOR_BGR2LAB)
+#     _, A2, _ = cv2.split(lab2)
+#
+#     # STRICTER Green Mask: Lowered upper bound from 110 to 115
+#     # This reduces the chance of grabbing "muddy yellow" as green.
+#     green_mask = cv2.inRange(A2, 0, 115)
+#     non_green = cv2.bitwise_not(green_mask)
+#
+#     # ==========================================================
+#     # 3️⃣ SPECIAL TARGETS (The Problem Solvers)
+#     # ==========================================================
+#
+#     # Target 1: #938B72 (Grayish-Brown)
+#     target_1 = cv2.inRange(hsv, (15, 30, 100), (30, 90, 180))
+#
+#     # Target 2: #464218 (Dark Olive)
+#     target_2 = cv2.inRange(hsv, (20, 100, 40), (35, 255, 120))
+#
+#     # Target 3: #8D8F79 (Gray-Green)
+#     target_3 = cv2.inRange(hsv, (25, 20, 100), (45, 75, 180))
+#
+#     # 🔴 NEW Target 4: "Dried Leaf / Khaki" (Based on your Hex Codes)
+#     # Covers #AC9C32, #664B34, #796251
+#     # These are Hue: 10-28, Saturation: Moderate-High, Value: Low-High
+#     # We allow this to be VERY broad because we will FORCE it to stay.
+#     target_4 = cv2.inRange(hsv, (10, 60, 50), (28, 200, 200))
+#
+#     # Group targets that are allowed to be "Greenish" or "Yellowish"
+#     # These bypass the 'non_green' check
+#     force_include = cv2.bitwise_or(target_2, target_3)
+#     force_include = cv2.bitwise_or(force_include, target_4)  # Add Target 4 here
+#
+#     # Target 1 is brown enough to respect the green filter
+#     target_1 = cv2.bitwise_and(target_1, non_green)
+#
+#     # Combine all special targets
+#     special_targets = cv2.bitwise_or(target_1, force_include)
+#     special_targets = cv2.bitwise_and(special_targets, mask)
+#
+#     # ==========================================================
+#     # 4️⃣ Standard Detection (Brown/Necrosis)
+#     # ==========================================================
+#     # Standard brown
+#     brown = cv2.inRange(hsv, (0, 40, 20), (30, 255, 220))
+#
+#     # Very dark necrosis
+#     dark1 = cv2.inRange(hsv, (0, 0, 0), (180, 255, 80))
+#
+#     strong_candidate = cv2.bitwise_or(brown, dark1)
+#     strong_candidate = cv2.bitwise_and(strong_candidate, non_green)
+#     strong_candidate = cv2.bitwise_and(strong_candidate, mask)
+#
+#     # ==========================================================
+#     # 5️⃣ Merge
+#     # ==========================================================
+#     # We skip "Light/Early" detection for this specific "dried" case
+#     # as it introduces noise, but you can add it back if needed.
+#
+#     candidate = cv2.bitwise_or(strong_candidate, special_targets)
+#
+#     # Morphological Closing to fill holes in the large dried area
+#     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # Increased kernel size slightly
+#     candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel_close)
+#
+#     # ==========================================================
+#     # 6️⃣ Final Contour Validation (The Logic Fix)
+#     # ==========================================================
+#     final = np.zeros_like(candidate)
+#     contours, _ = cv2.findContours(candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+#
+#     leaf_area = cv2.countNonZero(mask)
+#
+#     for c in contours:
+#         area = cv2.contourArea(c)
+#
+#         if area < 5: continue
+#
+#         # If the spot is HUGE (massive necrosis), we keep it!
+#         # Your previous code deleted it if area > 0.75
+#         if area > 0.90 * leaf_area: continue
+#
+#         contour_mask = np.zeros_like(candidate)
+#         cv2.drawContours(contour_mask, [c], -1, 255, -1)
+#
+#         # 1. Check Forced Inclusion
+#         is_forced = cv2.countNonZero(cv2.bitwise_and(force_include, contour_mask)) > 0
+#
+#         # 2. Dynamic Green Ratio
+#         # If the spot is large (> 5% of leaf), we are more lenient with the green ratio
+#         # because large necrotic spots often have yellow/olive centers.
+#         if area > 0.05 * leaf_area:
+#             ratio_threshold = 0.50  # Allow 50% "green-ish" pixels
+#         else:
+#             ratio_threshold = 0.20  # Strict for small spots
+#
+#         if not is_forced:
+#             green_pixels = cv2.bitwise_and(green_mask, contour_mask)
+#             green_ratio = cv2.countNonZero(green_pixels) / (area + 1e-5)
+#
+#             if green_ratio > ratio_threshold:
+#                 continue
+#
+#         cv2.drawContours(final, [c], -1, 255, -1)
+#
+#     return final
 
 
-def septoria_mask(img,hsve,gray, mask):
-
+def septoria_mask(img, hsve, gray, mask):
     # ==========================================================
     # 1️⃣ Lighting normalization
     # ==========================================================
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     L, A, B = cv2.split(lab)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # Stronger contrast limit to separate mud-brown from green
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
     L = clahe.apply(L)
 
     lab_norm = cv2.merge((L, A, B))
     img_norm = cv2.cvtColor(lab_norm, cv2.COLOR_LAB2BGR)
 
-    blur = cv2.medianBlur(img_norm, 5)
+    # Gaussian blur is better for large dried patches than Median
+    blur = cv2.GaussianBlur(img_norm, (5, 5), 0)
     hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
     H, S, V = cv2.split(hsv)
 
     # ==========================================================
-    # 2️⃣ Robust green removal using LAB (A channel)
+    # 2️⃣ Robust Green Removal
     # ==========================================================
     lab2 = cv2.cvtColor(img_norm, cv2.COLOR_BGR2LAB)
     _, A2, _ = cv2.split(lab2)
 
-    green_mask = cv2.inRange(A2, 0, 120)
+    # TIGHTER Green Mask.
+    # Standard Green is A < 115. We lower it to 112 to stop
+    # "Muddy Yellow" (A=113-115) from being counted as healthy.
+    green_mask = cv2.inRange(A2, 0, 112)
     non_green = cv2.bitwise_not(green_mask)
 
     # ==========================================================
-    # 3️⃣ Brown & dark necrosis detection
+    # 3️⃣ SPECIAL TARGETS (The "Blind Spot" Fixes)
+    # ==========================================================
+
+    # --- Target A: The "Khaki/Yellow-Brown" (Fix for #AC9C32) ---
+    # We extend Hue up to 35 (eating into Yellow-Green territory)
+    # BUT we require higher saturation/value to confirm it's not shadow.
+    target_khaki = cv2.inRange(hsv, (15, 50, 60), (35, 255, 255))
+
+    # --- Target B: The "Desaturated Gray/Dead" (Fix for #796251) ---
+    # This captures the top part of your leaf which is gray/dried.
+    # Hue: 0-40 (Red to Yellow), Saturation: VERY LOW (10-80), Value: Medium-High
+    target_gray = cv2.inRange(hsv, (0, 10, 60), (40, 90, 220))
+
+    # --- Target C: Dark Olive / Brown ---
+    target_olive = cv2.inRange(hsv, (20, 90, 40), (35, 255, 120))
+
+    # Combine Force-Include Targets
+    # These are allowed to exist even if they look "Greenish" to the algorithm
+    force_include = cv2.bitwise_or(target_khaki, target_gray)
+    force_include = cv2.bitwise_or(force_include, target_olive)
+
+    # ==========================================================
+    # 4️⃣ Standard Detection (Necrosis)
     # ==========================================================
     brown = cv2.inRange(hsv, (0, 40, 20), (30, 255, 220))
-    dark  = cv2.inRange(hsv, (0, 0, 0), (180, 255, 80))
+    dark = cv2.inRange(hsv, (0, 0, 0), (180, 255, 70))
 
     strong_candidate = cv2.bitwise_or(brown, dark)
     strong_candidate = cv2.bitwise_and(strong_candidate, non_green)
-    strong_candidate = cv2.bitwise_and(strong_candidate, mask)
 
     # ==========================================================
-    # 4️⃣ Light grey early spots (controlled detection)
+    # 5️⃣ Merge & Clean
     # ==========================================================
+    # Add the forced targets (Khaki/Gray) back in
+    candidate = cv2.bitwise_or(strong_candidate, force_include)
+    candidate = cv2.bitwise_and(candidate, mask)  # Ensure we stay inside the leaf
 
-    # Low saturation (grey-ish)
-    sat_mask = cv2.threshold(S, 70, 255, cv2.THRESH_BINARY_INV)[1]
+    # Morphological Close: Connects the patchy dried spots into one solid mass
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel_close)
 
-    # Slightly darker than average leaf
-    mean_val = cv2.mean(V, mask=mask)[0]
-    dark_mask = cv2.threshold(V, mean_val - 12, 255, cv2.THRESH_BINARY_INV)[1]
-
-    light_candidate = cv2.bitwise_and(sat_mask, dark_mask)
-    light_candidate = cv2.bitwise_and(light_candidate, non_green)
-    light_candidate = cv2.bitwise_and(light_candidate, mask)
-
-    # Only allow small light spots (prevent half-leaf issue)
-    temp = np.zeros_like(light_candidate)
-    contours_light, _ = cv2.findContours(
-        light_candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
+    # ==========================================================
+    # 6️⃣ Final Filter
+    # ==========================================================
+    final = np.zeros_like(candidate)
+    contours, _ = cv2.findContours(candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     leaf_area = cv2.countNonZero(mask)
 
-    for c in contours_light:
-
-        area = cv2.contourArea(c)
-
-        if area < 8:
-            continue
-
-        if area > 0.04 * leaf_area:
-            continue
-
-        perimeter = cv2.arcLength(c, True)
-        if perimeter == 0:
-            continue
-
-        circularity = 4 * np.pi * area / (perimeter * perimeter)
-
-        if circularity < 0.3:
-            continue
-
-        cv2.drawContours(temp, [c], -1, 255, -1)
-
-    light_candidate = temp
-
-    # ==========================================================
-    # 5️⃣ Merge strong + light detections
-    # ==========================================================
-    candidate = cv2.bitwise_or(strong_candidate, light_candidate)
-
-    # ==========================================================
-    # 6️⃣ Morphology
-    # ==========================================================
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7,7))
-    candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel_close)
-
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3,3))
-    candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel_open)
-
-    # ==========================================================
-    # 7️⃣ Final contour validation
-    # ==========================================================
-    final = np.zeros_like(candidate)
-    contours, _ = cv2.findContours(
-        candidate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-
     for c in contours:
-
         area = cv2.contourArea(c)
+        if area < 5: continue
 
-        if area < 20:
-            continue
-
-        if area > 0.75 * leaf_area:
-            continue
-
+        # Create a mask just for this specific spot to test it
         contour_mask = np.zeros_like(candidate)
         cv2.drawContours(contour_mask, [c], -1, 255, -1)
 
-        green_pixels = cv2.bitwise_and(green_mask, contour_mask)
-        green_ratio = cv2.countNonZero(green_pixels) / area
+        # 🛑 SAFETY CHECK: Is this a "Forced" color?
+        # If the spot overlaps with our Khaki/Gray masks, we KEEP IT.
+        # We do NOT check the green ratio. This is critical for large dried areas.
+        overlap = cv2.bitwise_and(contour_mask, force_include)
+        is_forced_type = cv2.countNonZero(overlap) > 10
 
-        if green_ratio > 0.15:
-            continue
+        if is_forced_type:
+            # It matches our special colors -> Keep it, no questions asked.
+            cv2.drawContours(final, [c], -1, 255, -1)
+        else:
+            # Standard brown spot -> Check if it's actually just healthy green noise
+            green_pixels = cv2.bitwise_and(green_mask, contour_mask)
+            green_ratio = cv2.countNonZero(green_pixels) / (area + 1e-5)
 
-        cv2.drawContours(final, [c], -1, 255, -1)
+            # If it's mostly green (and not Khaki/Gray), delete it
+            if green_ratio < 0.35:
+                cv2.drawContours(final, [c], -1, 255, -1)
 
     return final
-
 def bacterial_spot_mask(leaf,hsv_image,gray, leaf_mask):
     """
     Detects Bacterial Spot by finding dark (necrotic) regions
@@ -769,14 +886,14 @@ def build_dataset():
 
 
 def debug_segmentation(image_path, disease_folder_name):
-    """
-    Visual debugging tool for:
-    - GrabCut leaf segmentation
-    - Disease lesion detection (weak labels)
-
-    Green  = Leaf
-    Red    = Detected lesions
-    """
+    # """
+    # Visual debugging tool for:
+    # - GrabCut leaf segmentation
+    # - Disease lesion detection (weak labels)
+    #
+    # Green  = Leaf
+    # Red    = Detected lesions
+    # """
 
     # Load image
     image = cv2.imread(image_path)
@@ -833,24 +950,24 @@ def debug_segmentation(image_path, disease_folder_name):
 
 if __name__ == "__main__":
     # Uncomment this to run the full process
-    # build_dataset()
+    build_dataset()
 
     # Uncomment this to test a single image
     # debug_segmentation(
     #     image_path="Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite/72deb702-3883-4023-8d27-936917947afb___Com.G_SpM_FL 8440.JPG",
     #     disease_folder_name="Tomato_Spider_mites_Two_spotted_spider_mite"
     # )
-
-    BASE_DIR = r"Datasets/dataset_yolo/images/train/Tomato__Tomato_YellowLeaf__Curl_Virus"
-
-    for filename in os.listdir(BASE_DIR):
-
-        if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            continue
-        debug_segmentation(
-            image_path = os.path.join(BASE_DIR, filename),
-            disease_folder_name="Tomato__Tomato_YellowLeaf__Curl_Virus"
-        )
+    #
+    # BASE_DIR = r"Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite"
+    #
+    # for filename in os.listdir(BASE_DIR):
+    #
+    #     if not filename.lower().endswith((".jpg", ".jpeg", ".png")):
+    #         continue
+    #     debug_segmentation(
+    #         image_path = os.path.join(BASE_DIR, filename),
+    #         disease_folder_name="Tomato_Spider_mites_Two_spotted_spider_mite"
+    #     )
     # Pepper__bell___Bacterial_spot
     # Tomato_Bacterial_spot
     # Tomato_Septoria_leaf_spot
