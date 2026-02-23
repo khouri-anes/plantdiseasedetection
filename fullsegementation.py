@@ -679,7 +679,7 @@ def target_spot_mask(leaf,hsv, gray, leaf_mask):
     return final
 
 
-def mosaic_virus_mask(hsv, gray, leaf_mask):
+def mosaic_virus_mask(img,hsv, gray, leaf_mask):
     green = cv2.inRange(hsv, (35, 40, 40), (85, 255, 255))
     green = cv2.bitwise_and(green, leaf_mask)
 
@@ -688,7 +688,9 @@ def mosaic_virus_mask(hsv, gray, leaf_mask):
     lbp = lbp_map(gray)
     mosaic = lbp_variance_mask(lbp, leaf_mask)
 
-    combined = cv2.bitwise_and(mosaic, green)
+    chlorotic = cv2.inRange(hsv, (20, 20, 100), (90, 255, 255))
+    combined = cv2.bitwise_and(mosaic, chlorotic)
+
     # combined = mosaic_sanity(combined, leaf_mask)
 
     kernel = np.ones((5, 5), np.uint8)
@@ -697,7 +699,7 @@ def mosaic_virus_mask(hsv, gray, leaf_mask):
     return combined
 
 def curl_virus_mask(img,hsv,gray, mask):
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
     lesion = cv2.inRange(hsv, (18,40,120), (45,255,255))
     return cv2.bitwise_and(lesion, mask)
 
@@ -851,9 +853,6 @@ def build_dataset():
                     lesion_area = np.count_nonzero(lesion_mask)
 
                     if leaf_area > 0:
-                        if "curl" in disease.lower():
-                            severity = 1.0  # Structural = 100%
-                        else:
                             severity = lesion_area / leaf_area
 
                     # Only write labels if severity > 1% (filters noise)
@@ -947,11 +946,13 @@ def debug_segmentation(image_path, disease_folder_name):
     cv2.destroyAllWindows()
 
 
+import torch
 
 if __name__ == "__main__":
     # Uncomment this to run the full process
-    build_dataset()
-
+    # build_dataset()
+    print(torch.cuda.is_available())  # Should return True
+    print(torch.cuda.get_device_name(0))  # Should return "NVIDIA GeForce RTX 3060"
     # Uncomment this to test a single image
     # debug_segmentation(
     #     image_path="Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite/72deb702-3883-4023-8d27-936917947afb___Com.G_SpM_FL 8440.JPG",

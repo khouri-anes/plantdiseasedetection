@@ -1,22 +1,20 @@
 from ultralytics import YOLO
 
 def train():
-    model = YOLO()
+
+    model = YOLO("yolov8m-seg.pt")
 
     model.train(
         data="dataset.yaml",
-        epochs=80,
+        epochs=150,
         imgsz=640,
-        batch=1,            # auto batch size
-        optimizer="AdamW",
-        lr0=5e-4,
-        weight_decay=5e-4,
-        patience=20,
-        device="cpu",       # auto GPU / CPU
-        project="runs_segmentation",
-        name="plant_disease_seg",
+        batch=8,
+        device=0,
+        patience=30,
+        workers=8,
         exist_ok=True,
-        workers=8            # speed up loading
+        project="runs_segmentation",
+        name="plant_disease_seg_m",
     )
 
 if __name__ == "__main__":

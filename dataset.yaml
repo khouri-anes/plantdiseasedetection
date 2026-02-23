@@ -1,5 +1,4 @@
-path: Datasets/dataset_yolo # root folder of your dataset
-
+path: Datasets/PlantVillage_YOLO_SEG_FINAL
 train: images/train
 val: images/val
 
