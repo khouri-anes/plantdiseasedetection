@@ -7,7 +7,7 @@ def train():
         data="dataset.yaml",
         epochs=80,
         imgsz=640,
-        batch=8,            # auto batch size
+        batch=1,            # auto batch size
         optimizer="AdamW",
         lr0=5e-4,
         weight_decay=5e-4,
