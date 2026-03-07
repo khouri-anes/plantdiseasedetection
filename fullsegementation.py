@@ -814,13 +814,15 @@ def build_dataset():
 
     print(f"🚀 Starting Dataset Generation in: {OUTPUT_ROOT}")
 
-    for split in ["train", "val"]:
+    for split in ["train", "val", "test"]:  # Added "test" here
         # Create directories
         os.makedirs(os.path.join(OUTPUT_ROOT, "images", split), exist_ok=True)
         os.makedirs(os.path.join(OUTPUT_ROOT, "labels", split), exist_ok=True)
 
         split_path = os.path.join(INPUT_ROOT, split)
-        if not os.path.exists(split_path): continue
+        if not os.path.exists(split_path):
+            print(f"⚠️ Warning: {split_path} does not exist, skipping...")
+            continue
 
         for disease in os.listdir(split_path):
             if disease not in CLASS_MAP: continue
@@ -831,6 +833,7 @@ def build_dataset():
             print(f"📂 Processing {split}/{disease}...")
 
             for img_name in tqdm(os.listdir(folder)):
+
                 img_path = os.path.join(folder, img_name)
                 image = cv2.imread(img_path)
                 if image is None: continue
@@ -950,9 +953,9 @@ import torch
 
 if __name__ == "__main__":
     # Uncomment this to run the full process
-    # build_dataset()
-    print(torch.cuda.is_available())  # Should return True
-    print(torch.cuda.get_device_name(0))  # Should return "NVIDIA GeForce RTX 3060"
+    build_dataset()
+    # print(torch.cuda.is_available())  # Should return True
+    # print(torch.cuda.get_device_name(0))  # Should return "NVIDIA GeForce RTX 3060"
     # Uncomment this to test a single image
     # debug_segmentation(
     #     image_path="Datasets/dataset_yolo/images/train/Tomato_Spider_mites_Two_spotted_spider_mite/72deb702-3883-4023-8d27-936917947afb___Com.G_SpM_FL 8440.JPG",
