@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 # CONFIGURATION
 
-INPUT_ROOT = "Datasets/dataset_yolo/images"
+INPUT_ROOT = "Datasets/dataset_yolo2/images"
 OUTPUT_ROOT = "Datasets/PlantVillage_YOLO_SEG_FINAL"
 
 # Set True to visually check masks in 'OUTPUT_ROOT/debug'
