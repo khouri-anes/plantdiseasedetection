@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 
-model = YOLO("runs_segmentation/plant_disease_seg/weights/best.pt")
+model = YOLO("runs/segment/runs_segmentation/plant_disease_seg_m/weights/best.pt")
 
 def segment_image(image_path):
     results = model(image_path)
@@ -23,5 +23,5 @@ def segment_image(image_path):
 
 
 if __name__ == "__main__":
-    img, lesion_masks = segment_image("test.jpg")
+    img, lesion_masks = segment_image("Datasets/dataset_yolo/images/val/Tomato_Spider_mites_Two_spotted_spider_mite/72deb702-3883-4023-8d27-936917947afb___Com.G_SpM_FL 8440.JPG")
     print(f"{len(lesion_masks)} lesion(s) détectée(s)")
