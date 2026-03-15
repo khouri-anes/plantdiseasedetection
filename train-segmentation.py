@@ -10,8 +10,7 @@ def train():
 
             epochs=100,
             batch=32,
-            imgsz=320,
-
+            imgsz=256,
             optimizer="AdamW",
             lr0=0.001,
             weight_decay=0.0005,
